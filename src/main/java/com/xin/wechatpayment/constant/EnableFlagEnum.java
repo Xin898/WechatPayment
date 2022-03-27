@@ -1,6 +1,6 @@
 package com.xin.wechatpayment.constant;
 
-/*
+/**
  * created by Xin 2022-03-37
  */
 public enum EnableFlagEnum {

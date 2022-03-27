@@ -1,6 +1,6 @@
 package com.xin.wechatpayment.constant;
 
-/*
+/**
  * created by Xin 27-03-2022
  */
 public enum HttpContentType {

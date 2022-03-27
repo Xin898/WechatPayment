@@ -1,5 +1,6 @@
 package com.xin.wechatpayment.core.bo;
 
+import com.xin.wechatpayment.constant.ErrorCodeEnum;
 import lombok.Data;
 
 @Data

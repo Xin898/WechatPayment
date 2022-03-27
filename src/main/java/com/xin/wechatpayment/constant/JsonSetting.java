@@ -1,6 +1,8 @@
 package com.xin.wechatpayment.constant;
 
-
+/**
+ * created by xin 2022-03-28
+ */
 public enum JsonSetting {
     private static  final SerializeConfig serializeConfig;
 
