@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PaymentIntentTest {
     @Test
     void followsTheHappyPath() {
-        PaymentIntent payment = PaymentIntent.create("ORDER-001", 129900, "cny");
+        PaymentIntent payment = PaymentIntent.create("ORDER-DOMAIN-001", 129900, "cny");
 
         payment.startProcessing();
         payment.succeed("mock_123");
@@ -19,7 +19,7 @@ class PaymentIntentTest {
 
     @Test
     void rejectsAnIllegalTransition() {
-        PaymentIntent payment = PaymentIntent.create("ORDER-002", 100, "CNY");
+        PaymentIntent payment = PaymentIntent.create("ORDER-DOMAIN-002", 100, "CNY");
 
         assertThatThrownBy(() -> payment.succeed("mock_123"))
                 .isInstanceOf(IllegalStateException.class);

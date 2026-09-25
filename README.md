@@ -1,179 +1,173 @@
-# Payment Platform V2
+# Payment Systems Lab
 
-这是一个面向商户的支付平台工程。仓库根目录中原有的 `src/` 是早期微信支付 V2 接入代码，仅作为历史参考；新的实现位于 [payment-platform](./payment-platform)。
+一个可交互的支付系统知识项目：用真实的状态机、持久化、幂等记录和事件时间线解释生产级支付系统的核心问题。
 
-> 当前阶段使用 Mock Provider，不会发起真实扣款，也不要配置真实商户密钥。
+- **Live Demo:** https://xin898.github.io/WechatPayment/
+- **Backend:** Java 21 + Spring Boot 3
+- **Database:** PostgreSQL + Flyway
+- **Local stack:** Docker Compose
+- **Safety:** 全部交易由 Mock Provider 处理，不会产生真实扣款
 
-## 目标
+> 仓库根目录原有的 `src/` 是早期微信支付 V2 接入代码，仅作历史参考。新实现位于 [payment-platform](./payment-platform)。
 
-平台最终覆盖：
+## 现在可以体验什么
 
-- Payment Intent：创建、确认、查询、取消
-- 多支付渠道：Mock、微信支付 API v3，后续可扩展支付宝等
-- 全额及部分退款
-- 商户、客户和支付方式
-- 双式账本、余额与结算
-- Webhook 投递、签名和重试
-- 对账、差异处理和审计
-- 风控、限额和可观测性
-- 商户管理后台与演示收银台
+在 Payment Lab 中可以：
 
-## 系统架构
+1. 创建 Payment Intent。
+2. 模拟成功、明确拒付或渠道超时。
+3. 观察 `REQUIRES_CONFIRMATION → PROCESSING → 终态`。
+4. 使用相同 Idempotency Key 重放请求。
+5. 修改参数后复用同一个 Key，观察 `409 idempotency_conflict`。
+6. 重复确认同一笔支付，验证不会产生第二次渠道请求。
+7. 查看每次状态变化对应的领域事件。
 
-```mermaid
+GitHub Pages 使用浏览器内 Mock，便于公开体验；本地启动后，同一页面会自动连接 Spring Boot 与 PostgreSQL。
+
+## 架构
+
+~~~mermaid
 flowchart TD
-    Client["Checkout / Merchant Server"] --> Gateway["API Gateway"]
-    Gateway --> Payment["Payment Application"]
-    Payment --> Risk["Risk Engine"]
-    Payment --> Router["Provider Router"]
-    Router --> Provider["Payment Providers"]
-    Payment --> DB[("Payment DB")]
-    Payment --> Outbox[("Transactional Outbox")]
-    Outbox --> Bus["Event Bus"]
-    Bus --> Ledger["Double-entry Ledger"]
-    Bus --> Webhook["Webhook Delivery"]
-    Bus --> Settlement["Settlement"]
-    Bus --> Reconciliation["Reconciliation"]
-```
+    Browser["Payment Lab"] --> API["Payment API"]
+    API --> Idempotency["Idempotency Record"]
+    API --> Payment["Payment State Machine"]
+    Payment --> Provider["Mock / WeChat Provider"]
+    Payment --> Events["Payment Events"]
+    Idempotency --> DB[("PostgreSQL")]
+    Payment --> DB
+    Events --> DB
+    Events -. next .-> Outbox["Transactional Outbox"]
+    Outbox -. next .-> Ledger["Double-entry Ledger"]
+    Outbox -. next .-> Webhook["Webhook Delivery"]
+~~~
 
-第一阶段采用模块化单体。支付、账本、结算和 Webhook 在代码中保持领域边界，待吞吐量和团队规模确有需要时再独立部署。
+当前采用模块化单体，在代码内保持 API、Application、Domain、Infrastructure 和 Provider 的边界。等吞吐量或团队规模真正需要时再拆服务。
 
-## 核心设计原则
+## 核心设计
 
-1. **金额使用最小货币单位**：例如人民币分，禁止使用浮点数。
-2. **所有资金写操作支持幂等键**：相同键和相同请求返回首次结果；相同键但不同参数返回冲突。
-3. **状态通过状态机转换**：禁止业务代码任意覆盖支付状态。
-4. **渠道超时不等于失败**：结果未知时进入 `PROCESSING`，等待回调、主动查询或对账收敛。
-5. **业务记录与账本分离**：Payment 描述业务状态，Ledger 是余额和资金流向的唯一事实来源。
-6. **跨服务采用 Outbox**：数据库事务内同时写业务记录和事件，再异步投递。
-7. **消费者必须幂等**：系统按至少一次投递设计，不假设全链路 exactly-once。
-8. **账本只追加**：历史分录不修改，错误通过反向分录修正。
-9. **敏感数据不进入日志**：真实卡号、CVV、API Secret 和私钥不得保存到普通数据库或日志。
+### 金额
 
-## 支付状态机
+所有金额使用最小货币单位，例如人民币分。业务代码禁止使用浮点数计算资金。
 
-```mermaid
+### 幂等
+
+`Idempotency-Key` 与规范化请求的 SHA-256 指纹一起持久化：
+
+- Key 相同、参数相同：返回第一次创建的 Payment Intent。
+- Key 相同、参数不同：返回 `409 idempotency_conflict`。
+- 数据库主键负责最终唯一性约束。
+
+Demo 内还使用单实例锁缩小并发窗口；生产环境需要结合数据库冲突恢复或专门的幂等执行器。
+
+### 状态机
+
+~~~mermaid
 stateDiagram-v2
     [*] --> REQUIRES_CONFIRMATION
     REQUIRES_CONFIRMATION --> PROCESSING
     PROCESSING --> SUCCEEDED
     PROCESSING --> FAILED
-    REQUIRES_CONFIRMATION --> CANCELLED
-    SUCCEEDED --> PARTIALLY_REFUNDED
-    SUCCEEDED --> REFUNDED
-    PARTIALLY_REFUNDED --> REFUNDED
-```
+    PROCESSING --> PROCESSING: 结果未知
+~~~
 
-所有转换通过领域对象完成，并结合数据库条件更新或版本号处理并发。
+重复确认已进入处理或终态的支付会直接返回当前结果，不会再次调用 Provider。
 
-## 模块规划
+### 渠道超时
 
-```text
-payment-platform/
-├── api/                 HTTP API 与 DTO
-├── application/         用例编排、事务边界、幂等
-├── domain/              Payment、Refund、Ledger 等领域模型
-├── infrastructure/      数据库、Outbox、配置和可观测性
-└── provider/            支付渠道适配器
-```
+渠道超时不是支付失败。金额尾数为 `77` 时，Mock Provider 返回未知结果，支付保持 `PROCESSING`。真实系统需要由渠道回调、主动查询或对账任务收敛最终状态。
 
-当前提交先在一个 Maven 模块中建立这些 package。领域稳定后再拆为多个构建模块，避免过早增加工程复杂度。
-
-## API 草案
+## API
 
 | Method | Path | 说明 |
 |---|---|---|
-| POST | `/v1/payment-intents` | 创建支付意图，要求 `Idempotency-Key` |
-| POST | `/v1/payment-intents/{id}/confirm` | 使用 Mock Provider 确认支付 |
-| GET | `/v1/payment-intents/{id}` | 查询支付状态 |
-
-示例：
-
-```bash
-curl -X POST http://localhost:8080/v1/payment-intents \
-  -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: demo-order-001' \
-  -d '{"merchantOrderId":"ORDER-001","amount":129900,"currency":"CNY"}'
-```
-
-## 本地启动
-
-要求 Java 21 和 Maven 3.9+：
-
-```bash
-cd payment-platform
-mvn test
-mvn spring-boot:run
-```
+| POST | `/v1/payment-intents` | 创建支付，要求 `Idempotency-Key` |
+| POST | `/v1/payment-intents/{id}/confirm` | 确认支付，可安全重试 |
+| GET | `/v1/payment-intents/{id}` | 查询支付 |
+| GET | `/v1/payment-intents/{id}/events` | 查询事件时间线 |
 
 Mock Provider 规则：
 
-- 普通金额：支付成功
-- 金额尾数为 `02`：支付失败
-- 金额尾数为 `77`：保持处理中
+| 金额尾数 | 结果 |
+|---|---|
+| 普通尾数 | `SUCCEEDED` |
+| `02` | `FAILED` |
+| `77` | `PROCESSING` |
 
-## 数据模型
+## 本地运行
 
-首期核心表：
+要求 Docker 与 Docker Compose：
 
-- `payment_intent`
-- `payment_attempt`
-- `refund`
-- `outbox_event`
-- `consumer_inbox`
+~~~bash
+git clone https://github.com/Xin898/WechatPayment.git
+cd WechatPayment/payment-platform
+docker compose up --build
+~~~
 
-后续账务表：
+打开 http://localhost:8080 。
 
-- `ledger_account`
-- `ledger_transaction`
-- `ledger_entry`
-- `settlement`
+也可以使用本地 Java 21 和 Maven 3.9+，但需要先准备 PostgreSQL：
 
-关键唯一约束：
+~~~bash
+cd payment-platform
+mvn verify
+mvn spring-boot:run
+~~~
 
-- `(merchant_id, merchant_order_id)`
-- `(merchant_id, operation, idempotency_key)`
-- `(provider, provider_reference)`
-- `(consumer_name, event_id)`
+默认数据库配置：
 
-## 建设路线
+~~~text
+DATABASE_URL=jdbc:postgresql://localhost:5432/payment
+DATABASE_USER=payment
+DATABASE_PASSWORD=payment
+~~~
 
-### Phase 1 — 可运行的模拟支付
+这些默认值仅用于本地 Demo；生产环境必须使用 Secret Manager。
 
-- [x] 新工程和架构文档
-- [x] Payment Intent 基础状态机
+## 工程结构
+
+~~~text
+payment-platform/
+├── src/main/java/com/xin/payment/
+│   ├── api/
+│   ├── application/
+│   ├── domain/
+│   ├── infrastructure/
+│   └── provider/
+├── src/main/resources/
+│   ├── db/migration/
+│   └── static/
+├── src/test/
+├── Dockerfile
+└── compose.yml
+~~~
+
+## 路线图
+
+### 已完成
+
+- [x] Payment Intent 状态机
 - [x] Mock Provider
-- [x] 创建、确认和查询 API
-- [ ] PostgreSQL 持久化
-- [ ] Flyway Migration
-- [ ] 数据库幂等记录
-- [ ] 集成测试
+- [x] 创建、确认、查询 API
+- [x] PostgreSQL 持久化
+- [x] Flyway Migration
+- [x] 数据库幂等记录与请求指纹
+- [x] 支付事件时间线
+- [x] 交互式 Payment Lab
+- [x] Docker Compose
+- [x] GitHub Actions CI
+- [x] GitHub Pages 发布流程
 
-### Phase 2 — 可靠性基础
+### 下一阶段：可靠性与资金系统
 
 - [ ] Transactional Outbox
-- [ ] 异步任务和重试
-- [ ] Webhook 签名及投递
+- [ ] 异步任务、重试与 Consumer Inbox
+- [ ] Webhook 签名与投递
 - [ ] Refund 状态机
-- [ ] 指标、Tracing 和审计日志
+- [ ] 双式账本与商户余额
+- [ ] 结算、Payout 与对账
+- [ ] OpenTelemetry、指标和审计日志
+- [ ] 微信支付 API v3 Connector
 
-### Phase 3 — 资金系统
+## 安全说明
 
-- [ ] 双式账本
-- [ ] 商户余额
-- [ ] 结算批次与 Payout
-- [ ] 渠道及银行对账
-
-### Phase 4 — 真实渠道
-
-- [ ] 微信支付 API v3
-- [ ] 平台证书和密钥托管
-- [ ] 支付回调验签
-- [ ] 沙箱及联调环境
-- [ ] 风控与限额
-
-## Legacy 代码说明
-
-旧 `src/` 包含微信支付 V2、MyBatis、Druid 和部分工具类，但存在未完成方法、包名残留、缺失 Mapper 及过期依赖。新实现不会直接依赖它。
-
-旧配置曾包含明文数据库凭证。任何曾经使用过的同类密码都应轮换；新的配置必须通过环境变量或 Secret Manager 注入。
+不要在仓库中提交真实卡号、CVV、API Secret、私钥或生产数据库凭证。旧工程历史中曾出现本地数据库密码；任何被复用过的密码都应轮换。

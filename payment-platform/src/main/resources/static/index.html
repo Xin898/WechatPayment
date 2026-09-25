@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="通过交互式实验理解支付状态机、幂等和渠道不确定性。">
+  <title>Payment Systems Lab</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#lab" aria-label="Payment Systems Lab 首页">
+      <span class="brand-mark">P</span>
+      <span>Payment Systems Lab</span>
+    </a>
+    <nav aria-label="主导航">
+      <a href="#lab">实验室</a>
+      <a href="#concepts">技术原理</a>
+      <a href="https://github.com/Xin898/WechatPayment">源码</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="intro">
+      <p class="eyebrow">INTERACTIVE SYSTEM DESIGN</p>
+      <h1>别只读支付架构。<br><span>亲手制造一次故障。</span></h1>
+      <p class="lede">创建 Payment Intent，模拟成功、拒付与渠道超时，观察状态机、幂等响应和事件时间线如何共同保护一笔交易。</p>
+      <div class="mode" id="modeBadge">正在检测运行模式…</div>
+    </section>
+
+    <section class="lab" id="lab" aria-labelledby="labTitle">
+      <div class="panel control-panel">
+        <div class="section-heading">
+          <div>
+            <p class="step-label">01 / CREATE</p>
+            <h2 id="labTitle">创建模拟支付</h2>
+          </div>
+          <button class="ghost-button" id="resetButton" type="button">重置</button>
+        </div>
+
+        <form id="paymentForm">
+          <label>
+            商户订单号
+            <input id="orderId" name="orderId" maxlength="128" required>
+          </label>
+          <div class="field-row">
+            <label>
+              金额（分）
+              <input id="amount" name="amount" type="number" min="1" value="129900" required>
+            </label>
+            <label>
+              币种
+              <select id="currency" name="currency">
+                <option value="CNY">CNY</option>
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            Idempotency Key
+            <input id="idempotencyKey" name="idempotencyKey" maxlength="128" required>
+          </label>
+
+          <fieldset>
+            <legend>渠道结果</legend>
+            <div class="scenario-grid">
+              <button type="button" class="scenario active" data-suffix="00">
+                <strong>成功</strong><span>Provider 接受支付</span>
+              </button>
+              <button type="button" class="scenario" data-suffix="02">
+                <strong>拒付</strong><span>明确失败，不应重试</span>
+              </button>
+              <button type="button" class="scenario" data-suffix="77">
+                <strong>超时</strong><span>结果未知，保持处理中</span>
+              </button>
+            </div>
+          </fieldset>
+
+          <div class="actions">
+            <button class="primary-button" id="createButton" type="submit">创建 Payment Intent</button>
+            <button class="secondary-button" id="confirmButton" type="button" disabled>确认支付</button>
+          </div>
+        </form>
+
+        <div class="experiment-note">
+          <strong>试试幂等：</strong>使用相同 Key 重复创建会返回同一笔支付；修改金额后再使用该 Key，会得到 <code>409 idempotency_conflict</code>。
+        </div>
+      </div>
+
+      <div class="workspace">
+        <section class="panel status-panel" aria-labelledby="statusTitle">
+          <div class="section-heading">
+            <div>
+              <p class="step-label">02 / OBSERVE</p>
+              <h2 id="statusTitle">状态机</h2>
+            </div>
+            <span class="status-pill idle" id="statusPill">未创建</span>
+          </div>
+
+          <div class="state-machine" aria-label="支付状态流转">
+            <div class="state active" data-state="REQUIRES_CONFIRMATION">
+              <span>1</span><b>待确认</b>
+            </div>
+            <div class="connector"></div>
+            <div class="state" data-state="PROCESSING">
+              <span>2</span><b>处理中</b>
+            </div>
+            <div class="connector split"></div>
+            <div class="final-states">
+              <div class="state" data-state="SUCCEEDED"><span>3A</span><b>成功</b></div>
+              <div class="state" data-state="FAILED"><span>3B</span><b>失败</b></div>
+            </div>
+          </div>
+
+          <dl class="payment-meta">
+            <div><dt>Payment ID</dt><dd id="paymentId">—</dd></div>
+            <div><dt>Provider Ref</dt><dd id="providerRef">—</dd></div>
+            <div><dt>Failure Code</dt><dd id="failureCode">—</dd></div>
+          </dl>
+        </section>
+
+        <section class="panel timeline-panel">
+          <div class="section-heading">
+            <div>
+              <p class="step-label">03 / TRACE</p>
+              <h2>事件时间线</h2>
+            </div>
+          </div>
+          <ol class="timeline" id="timeline">
+            <li class="empty">创建一笔支付后，领域事件会出现在这里。</li>
+          </ol>
+        </section>
+
+        <details class="panel response-panel">
+          <summary>查看最后一次 API 响应</summary>
+          <pre id="apiResponse">{}</pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="concepts" id="concepts">
+      <div class="concept-intro">
+        <p class="eyebrow">WHY IT WORKS</p>
+        <h2>支付系统不是一个按钮，<br>而是一组可以恢复的承诺。</h2>
+      </div>
+      <div class="concept-grid">
+        <article>
+          <span>01</span>
+          <h3>幂等</h3>
+          <p>网络重试不会生成第二笔支付。Key 与请求指纹绑定，参数改变会明确冲突。</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h3>状态机</h3>
+          <p>资金状态只能沿合法路径变化，避免并发请求将终态覆盖成错误状态。</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h3>未知不是失败</h3>
+          <p>渠道超时意味着结果未知。系统保持 PROCESSING，等待回调、查询或对账收敛。</p>
+        </article>
+        <article>
+          <span>04</span>
+          <h3>事件轨迹</h3>
+          <p>每个关键变化都留下事件，为 Webhook、账本、审计和故障恢复提供依据。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Payment Systems Lab · Mock transactions only</span>
+    <a href="https://github.com/Xin898/WechatPayment">View source on GitHub ↗</a>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

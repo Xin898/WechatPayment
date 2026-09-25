@@ -1,10 +1,10 @@
 package com.xin.payment.api;
 
+import com.xin.payment.application.PaymentService.IdempotencyConflictException;
 import com.xin.payment.application.PaymentService.PaymentNotFoundException;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.ResponseStatus;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
@@ -13,12 +13,25 @@ public class ApiExceptionHandler {
     @ExceptionHandler(PaymentNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     Map<String, String> notFound(PaymentNotFoundException exception) {
-        return Map.of("code", "payment_not_found", "message", exception.getMessage());
+        return error("payment_not_found", exception.getMessage());
     }
 
-    @ExceptionHandler(IllegalStateException.class)
+    @ExceptionHandler({IllegalStateException.class, IdempotencyConflictException.class})
     @ResponseStatus(HttpStatus.CONFLICT)
-    Map<String, String> conflict(IllegalStateException exception) {
-        return Map.of("code", "invalid_payment_state", "message", exception.getMessage());
+    Map<String, String> conflict(RuntimeException exception) {
+        String code = exception instanceof IdempotencyConflictException
+                ? "idempotency_conflict"
+                : "invalid_payment_state";
+        return error(code, exception.getMessage());
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    Map<String, String> validation(MethodArgumentNotValidException exception) {
+        return error("invalid_request", "Request validation failed");
+    }
+
+    private static Map<String, String> error(String code, String message) {
+        return Map.of("code", code, "message", message);
     }
 }
