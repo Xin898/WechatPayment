@@ -21,17 +21,23 @@ public class PaymentService {
     private final PaymentIntentRepository payments;
     private final IdempotencyRecordRepository idempotencyRecords;
     private final PaymentEventRepository events;
+    private final LedgerService ledger;
+    private final OutboxService outbox;
 
     public PaymentService(
             PaymentProvider paymentProvider,
             PaymentIntentRepository payments,
             IdempotencyRecordRepository idempotencyRecords,
-            PaymentEventRepository events
+            PaymentEventRepository events,
+            LedgerService ledger,
+            OutboxService outbox
     ) {
         this.paymentProvider = paymentProvider;
         this.payments = payments;
         this.idempotencyRecords = idempotencyRecords;
         this.events = events;
+        this.ledger = ledger;
+        this.outbox = outbox;
     }
 
     @Transactional
@@ -87,6 +93,9 @@ public class PaymentService {
                         "payment.succeeded",
                         "Provider confirmed the payment"
                 ));
+                ledger.recordPayment(payment);
+                outbox.append("PAYMENT", payment.id(), "payment.succeeded",
+                        "{\"paymentId\":\"" + payment.id() + "\",\"amount\":" + payment.amount() + ",\"currency\":\"" + payment.currency() + "\"}");
             }
             case FAILED -> {
                 payment.fail(result.failureCode());

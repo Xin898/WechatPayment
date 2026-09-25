@@ -118,7 +118,7 @@ h1 span { color: var(--accent); }
   top: 20px;
 }
 .workspace { display: grid; gap: 20px; }
-.status-panel, .timeline-panel { padding: 28px; }
+.status-panel, .timeline-panel, .operations-panel { padding: 28px; }
 .response-panel { padding: 20px 24px; }
 
 .section-heading {
@@ -240,6 +240,16 @@ code { color: var(--accent); }
 }
 .payment-meta dt { color: var(--muted); font-size: .72rem; }
 .payment-meta dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem; overflow-wrap: anywhere; }
+.refund-box { margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); display: grid; gap: 14px; }
+.refund-box .field-row { grid-template-columns: 1fr 1.35fr; }
+.ops-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.ops-grid article { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #091612; }
+.data-list { display: grid; gap: 8px; }
+.data-card { padding: 10px; border-radius: 9px; background: #06100d; font: .68rem/1.45 ui-monospace, monospace; overflow-wrap: anywhere; }
+.data-card strong { display: block; color: var(--accent); margin-bottom: 4px; }
+.data-card.failed strong { color: var(--danger); }
+.entry { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); }
+.empty-copy { color: var(--muted); font-size: .76rem; line-height: 1.5; }
 
 .timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
 .timeline li {
@@ -300,6 +310,7 @@ footer {
 
 @media (max-width: 860px) {
   .lab, .concepts { grid-template-columns: 1fr; }
+  .ops-grid { grid-template-columns: 1fr; }
   .control-panel { position: static; }
   .concepts { gap: 36px; }
 }
@@ -309,10 +320,11 @@ footer {
   nav a:not(:last-child) { display: none; }
   .intro { padding-top: 60px; }
   .lab { grid-template-columns: minmax(0, 1fr); }
-  .control-panel, .status-panel, .timeline-panel { padding: 20px; }
+  .control-panel, .status-panel, .timeline-panel, .operations-panel { padding: 20px; }
   .scenario-grid, .actions, .concept-grid { grid-template-columns: 1fr; }
   .state-machine { grid-template-columns: 1fr; gap: 7px; }
   .connector { width: 1px; height: 14px; margin-left: 24px; }
   .payment-meta div { grid-template-columns: 1fr; gap: 5px; }
+  .refund-box .field-row { grid-template-columns: 1fr; }
   footer { gap: 20px; flex-direction: column; }
 }

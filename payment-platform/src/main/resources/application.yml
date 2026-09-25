@@ -24,3 +24,9 @@ management:
 
 server:
   shutdown: graceful
+
+payment:
+  outbox:
+    poll-interval-ms: 1500
+  webhook:
+    poll-interval-ms: 2000

@@ -31,6 +31,12 @@ public class ApiExceptionHandler {
         return error("invalid_request", "Request validation failed");
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    Map<String, String> badRequest(IllegalArgumentException exception) {
+        return error("invalid_request", exception.getMessage());
+    }
+
     private static Map<String, String> error(String code, String message) {
         return Map.of("code", code, "message", message);
     }

@@ -24,7 +24,7 @@
     <section class="intro">
       <p class="eyebrow">INTERACTIVE SYSTEM DESIGN</p>
       <h1>别只读支付架构。<br><span>亲手制造一次故障。</span></h1>
-      <p class="lede">创建 Payment Intent，模拟成功、拒付与渠道超时，观察状态机、幂等响应和事件时间线如何共同保护一笔交易。</p>
+      <p class="lede">创建 Payment Intent，模拟成功、退款与网络故障，观察状态机、双式账本、Transactional Outbox 和 Webhook 重试如何共同保护一笔交易。</p>
       <div class="mode" id="modeBadge">正在检测运行模式…</div>
     </section>
 
@@ -117,7 +117,17 @@
             <div><dt>Payment ID</dt><dd id="paymentId">—</dd></div>
             <div><dt>Provider Ref</dt><dd id="providerRef">—</dd></div>
             <div><dt>Failure Code</dt><dd id="failureCode">—</dd></div>
+            <div><dt>Refunded</dt><dd id="refundedAmount">0</dd></div>
           </dl>
+
+          <div class="refund-box">
+            <div><p class="step-label">REFUND STATE MACHINE</p><h3>发起退款</h3></div>
+            <div class="field-row">
+              <label>退款金额（分）<input id="refundAmount" type="number" min="1" value="3000"></label>
+              <label>退款 Key<input id="refundKey" maxlength="128"></label>
+            </div>
+            <button class="secondary-button" id="refundButton" type="button" disabled>退款</button>
+          </div>
         </section>
 
         <section class="panel timeline-panel">
@@ -130,6 +140,15 @@
           <ol class="timeline" id="timeline">
             <li class="empty">创建一笔支付后，领域事件会出现在这里。</li>
           </ol>
+        </section>
+
+        <section class="panel operations-panel">
+          <div class="section-heading"><div><p class="step-label">04 / RELIABILITY</p><h2>资金与消息链路</h2></div><button class="ghost-button" id="refreshOpsButton" type="button">刷新</button></div>
+          <div class="ops-grid">
+            <article><h3>双式账本</h3><div id="ledgerView" class="data-list"><p class="empty-copy">支付成功后生成平衡分录。</p></div></article>
+            <article><h3>Transactional Outbox</h3><div id="outboxView" class="data-list"><p class="empty-copy">业务事务提交后等待发布。</p></div></article>
+            <article><h3>Webhook 重试</h3><div id="webhookView" class="data-list"><p class="empty-copy">Mock 端点前两次返回 503，第三次成功。</p></div></article>
+          </div>
         </section>
 
         <details class="panel response-panel">
@@ -162,8 +181,18 @@
         </article>
         <article>
           <span>04</span>
-          <h3>事件轨迹</h3>
-          <p>每个关键变化都留下事件，为 Webhook、账本、审计和故障恢复提供依据。</p>
+          <h3>可靠消息</h3>
+          <p>业务状态与 Outbox 同事务提交，后台投递 Webhook，并用退避重试收敛临时故障。</p>
+        </article>
+        <article>
+          <span>05</span>
+          <h3>双式账本</h3>
+          <p>每笔资金动作同时产生等额借贷分录，不平衡的交易无法入账。</p>
+        </article>
+        <article>
+          <span>06</span>
+          <h3>退款状态机</h3>
+          <p>退款从 PENDING 收敛到 SUCCEEDED，并同步更新可退金额与反向分录。</p>
         </article>
       </div>
     </section>

@@ -1,6 +1,8 @@
 package com.xin.payment.application;
 
 import com.xin.payment.domain.PaymentStatus;
+import com.xin.payment.infrastructure.LedgerTransactionRepository;
+import com.xin.payment.infrastructure.OutboxEventRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,6 +18,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PaymentServiceIntegrationTest {
     @Autowired
     PaymentService paymentService;
+    @Autowired RefundService refundService;
+    @Autowired LedgerTransactionRepository ledgerTransactions;
+    @Autowired OutboxEventRepository outboxEvents;
 
     @Test
     void returnsTheSamePaymentForTheSameIdempotentRequest() {
@@ -44,5 +49,26 @@ class PaymentServiceIntegrationTest {
         assertThat(first.status()).isEqualTo(PaymentStatus.SUCCEEDED);
         assertThat(second.status()).isEqualTo(PaymentStatus.SUCCEEDED);
         assertThat(second.providerReference()).isEqualTo(first.providerReference());
+        var ledger = ledgerTransactions.findByReferenceIdOrderByCreatedAtDesc(first.id());
+        assertThat(ledger).hasSize(1);
+        assertThat(ledger.getFirst().entries()).hasSize(3);
+        assertThat(outboxEvents.findTop50ByOrderByCreatedAtDesc())
+                .extracting(event -> event.eventType())
+                .contains("payment.succeeded");
+    }
+
+    @Test
+    void partialAndFullRefundsFollowStateMachineAndBalanceTheLedger() {
+        var payment = paymentService.create("idem-refund-payment", "ORDER-REFUND", 10000, "CNY");
+        paymentService.confirm(payment.id());
+
+        var partial = refundService.create(payment.id(), "refund-001", 3000);
+        assertThat(partial.status().name()).isEqualTo("SUCCEEDED");
+        assertThat(paymentService.get(payment.id()).status()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(ledgerTransactions.findByReferenceIdOrderByCreatedAtDesc(partial.id()).getFirst().entries()).hasSize(2);
+
+        refundService.create(payment.id(), "refund-002", 7000);
+        assertThat(paymentService.get(payment.id()).status()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(paymentService.get(payment.id()).refundedAmount()).isEqualTo(10000);
     }
 }

@@ -19,6 +19,9 @@ public class PaymentIntent {
     @Column(nullable = false)
     private long amount;
 
+    @Column(name = "refunded_amount", nullable = false)
+    private long refundedAmount;
+
     @Column(nullable = false, length = 3)
     private String currency;
 
@@ -50,6 +53,7 @@ public class PaymentIntent {
         this.id = Objects.requireNonNull(id);
         this.merchantOrderId = Objects.requireNonNull(merchantOrderId);
         this.amount = amount;
+        this.refundedAmount = 0;
         this.currency = Objects.requireNonNull(currency).toUpperCase(Locale.ROOT);
         this.status = PaymentStatus.REQUIRES_CONFIRMATION;
         this.createdAt = Instant.now();
@@ -86,6 +90,18 @@ public class PaymentIntent {
         touch();
     }
 
+    public void applyRefund(long refundAmount) {
+        if (status != PaymentStatus.SUCCEEDED && status != PaymentStatus.PARTIALLY_REFUNDED) {
+            throw new IllegalStateException("Only a succeeded payment can be refunded");
+        }
+        if (refundAmount <= 0 || refundedAmount + refundAmount > amount) {
+            throw new IllegalArgumentException("Refund amount exceeds the refundable amount");
+        }
+        refundedAmount += refundAmount;
+        status = refundedAmount == amount ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
+        touch();
+    }
+
     private void requireStatus(PaymentStatus expected) {
         if (status != expected) {
             throw new IllegalStateException("Expected " + expected + " but was " + status);
@@ -99,6 +115,7 @@ public class PaymentIntent {
     public UUID id() { return id; }
     public String merchantOrderId() { return merchantOrderId; }
     public long amount() { return amount; }
+    public long refundedAmount() { return refundedAmount; }
     public String currency() { return currency; }
     public PaymentStatus status() { return status; }
     public String providerReference() { return providerReference; }
