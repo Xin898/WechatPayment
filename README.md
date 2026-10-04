@@ -1,6 +1,6 @@
-# Payment Systems Lab
+# Direct Commerce & Payment Systems Lab
 
-一个可交互的支付系统知识项目：用状态机、持久化、幂等、Transactional Outbox、Webhook 重试和双式账本解释生产级支付系统的核心问题。
+一个仓库中的直营电商完整 Demo：购物车、订单、仓库库存、支付平台与自由电子钱包（Voucher）组成可运行的结账纵向切片；底层继续用状态机、幂等、Transactional Outbox、Webhook 重试和双式账本保护资金。
 
 - **Live Demo:** https://xin898.github.io/WechatPayment/
 - **Backend:** Java 21 + Spring Boot 3
@@ -12,7 +12,17 @@
 
 ## 现在可以体验什么
 
-在 Payment Lab 中可以：
+在 Commerce Lab 中可以先体验：
+
+1. 浏览商品并加入购物车。
+2. 查看仓库可售库存，结账时执行库存预占。
+3. 给用户发行 Voucher，并优先使用钱包余额。
+4. 使用 `Voucher + Payment Intent` 完成混合支付。
+5. 全 Voucher 支付时跳过外部支付平台。
+6. 支付成功后确认出库；支付失败时释放库存并返还 Voucher。
+7. 使用 Idempotency Key 防止重复创建订单与重复预占。
+
+Payment Lab 继续支持：
 
 1. 创建 Payment Intent。
 2. 模拟成功、明确拒付或渠道超时。
@@ -31,20 +41,33 @@ GitHub Pages 使用浏览器内 Mock，便于公开体验；本地启动后，�
 
 ~~~mermaid
 flowchart TD
-    Browser["Payment Lab"] --> API["Payment API"]
-    API --> Idempotency["Idempotency Record"]
-    API --> Payment["Payment State Machine"]
-    Payment --> Provider["Mock / WeChat Provider"]
-    Payment --> Events["Payment Events"]
-    Idempotency --> DB[("PostgreSQL")]
-    Payment --> DB
-    Events --> DB
+    Storefront["Commerce Lab"] --> Cart["Shopping Cart"]
+    Cart --> Checkout["Checkout Orchestrator"]
+    Checkout --> Inventory["Warehouse Inventory"]
+    Checkout --> Order["Order State Machine"]
+    Checkout --> Wallet["Voucher Wallet"]
+    Checkout --> Payment["Payment Platform"]
     Payment --> Ledger["Double-entry Ledger"]
-    Payment --> Outbox["Transactional Outbox"]
+    Order --> Outbox["Transactional Outbox"]
+    Payment --> Outbox
     Outbox --> Webhook["Retrying Webhook"]
+    Inventory --> DB[("PostgreSQL")]
+    Order --> DB
+    Wallet --> DB
+    Payment --> DB
 ~~~
 
-当前采用模块化单体，在代码内保持 API、Application、Domain、Infrastructure 和 Provider 的边界。等吞吐量或团队规模真正需要时再拆服务。
+当前采用模块化单体：一个 Git 仓库、一个 Spring Boot 部署单元、一个 PostgreSQL，但购物车、订单、库存、Voucher 和支付拥有各自的模型与表。这样能够演示真实事务边界，又保留未来按吞吐量或团队边界拆服务的路径。
+
+| 模块 | 职责 | 关键不变量 |
+|---|---|---|
+| Cart | 购物意图与价格快照 | 已结账购物车不可再次修改 |
+| Warehouse | `on_hand / reserved / available` | 可售库存不能为负；确认出库前必须预占 |
+| Order | 订单金额、支付引用、状态机 | 同一 Checkout Key 只创建一张订单 |
+| Voucher Wallet | 发行、消费、失败返还与流水 | 余额不能为负；所有变化都有流水 |
+| Payment | 外部支付、退款、账本和可靠通知 | 金额使用最小单位；账本借贷平衡 |
+
+结账顺序为：`Cart → Reserve Stock → Create Order → Spend Voucher → Create/Confirm Payment → Commit Stock`。任一步抛出异常，数据库事务会回滚；明确支付失败则通过补偿动作释放预占并返还 Voucher。
 
 支付成功或退款时，业务状态、账本分录与 Outbox 事件在同一个 PostgreSQL 事务中提交。后台调度器只处理已提交的 Outbox，创建唯一的 Webhook Delivery；Demo 端点前两次返回 `503`，随后成功，用于展示可恢复投递。
 
@@ -106,6 +129,21 @@ stateDiagram-v2
 | GET | `/v1/operations/webhooks` | 查看 Webhook 投递与重试 |
 | POST | `/v1/operations/webhooks/{id}/retry` | 手动重新激活失败投递 |
 
+电商 API：
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/v1/commerce/products` | 商品与可售库存 |
+| POST | `/v1/commerce/carts` | 创建购物车 |
+| POST | `/v1/commerce/carts/{id}/items` | 加入商品 |
+| GET | `/v1/commerce/carts/{id}` | 查看购物车价格快照 |
+| POST | `/v1/commerce/checkout` | 幂等结账、库存预占、混合支付 |
+| POST | `/v1/commerce/orders/{id}/confirm` | 确认订单的外部支付 |
+| GET | `/v1/commerce/orders/{id}` | 查询订单 |
+| POST | `/v1/commerce/wallets/{customerId}/vouchers` | 发行 Voucher |
+| GET | `/v1/commerce/wallets/{customerId}` | 查询钱包余额 |
+| GET | `/v1/commerce/wallets/{customerId}/entries` | 查询 Voucher 流水 |
+
 Mock Provider 规则：
 
 | 金额尾数 | 结果 |
@@ -151,6 +189,7 @@ payment-platform/
 ├── src/main/java/com/xin/payment/
 │   ├── api/
 │   ├── application/
+│   ├── commerce/       # cart, order, inventory, voucher, checkout
 │   ├── domain/
 │   ├── infrastructure/
 │   └── provider/
@@ -181,10 +220,18 @@ payment-platform/
 - [x] Webhook 自动重试与手动重试
 - [x] Refund 状态机与退款幂等
 - [x] 双式账本与平衡校验
+- [x] 商品与购物车系统
+- [x] 仓库库存预占、释放与确认出库
+- [x] 订单状态机与幂等结账
+- [x] 自由电子钱包 / Voucher 发行、消费、返还与流水
+- [x] Voucher + Payment Intent 混合支付
 
-### 下一阶段：可靠性与资金系统
+### 下一阶段：履约与运营系统
 
 - [ ] 异步任务、重试与 Consumer Inbox
+- [ ] 多仓选址、拆单与调拨
+- [ ] Shipment、物流轨迹与退货入库
+- [ ] Voucher 有效期、批次、使用范围与风控
 - [ ] Webhook HMAC 签名与密钥轮换
 - [ ] 商户余额快照
 - [ ] 结算、Payout 与对账

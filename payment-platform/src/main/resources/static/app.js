@@ -217,7 +217,113 @@
   }
   function escapeHtml(value) { var element = document.createElement("div"); element.textContent = value == null ? "" : String(value); return element.innerHTML; }
 
+  var commerceProducts = [
+    { sku: "SKU-COFFEE", name: "Origin Coffee Beans", unitPrice: 1899, currency: "CNY", available: 100 },
+    { sku: "SKU-MUG", name: "System Design Mug", unitPrice: 2499, currency: "CNY", available: 60 },
+    { sku: "SKU-HOODIE", name: "Platform Engineering Hoodie", unitPrice: 6999, currency: "CNY", available: 30 }
+  ];
+  var commerceItems = {};
+  var commerceCartId = null;
+  var commerceCustomer = "demo-" + Date.now().toString().slice(-8);
+  var commerceWallet = 5000;
+  var commerceWalletCreated = false;
+
+  function renderCommerceProducts() {
+    document.getElementById("productGrid").innerHTML = commerceProducts.map(function (product) {
+      return '<div class="product-card"><strong>' + escapeHtml(product.name) + '</strong><small>' + product.unitPrice + ' ' + product.currency + ' · 库存 ' + product.available + '</small><button type="button" data-commerce-sku="' + product.sku + '" aria-label="添加 ' + escapeHtml(product.name) + '">+</button></div>';
+    }).join("");
+    document.querySelectorAll("[data-commerce-sku]").forEach(function (button) {
+      button.addEventListener("click", function () { addCommerceItem(button.dataset.commerceSku); });
+    });
+  }
+
+  function commerceTotal() {
+    return Object.keys(commerceItems).reduce(function (sum, sku) {
+      var product = commerceProducts.find(function (item) { return item.sku === sku; });
+      return sum + product.unitPrice * commerceItems[sku];
+    }, 0);
+  }
+
+  function renderCommerceCart() {
+    var count = Object.values(commerceItems).reduce(function (sum, quantity) { return sum + quantity; }, 0);
+    document.getElementById("cartSummary").textContent = count + " 件 · " + commerceTotal() + " CNY";
+    document.getElementById("walletBalance").textContent = commerceWallet.toLocaleString() + " CNY";
+    document.getElementById("commerceCheckout").disabled = count === 0;
+  }
+
+  async function ensureCommerceBackend() {
+    if (isPages || commerceCartId) return;
+    var cart = await api("/v1/commerce/carts", { method: "POST", body: JSON.stringify({ customerId: commerceCustomer }) });
+    commerceCartId = cart.id;
+    if (!commerceWalletCreated) {
+      await api("/v1/commerce/wallets/" + commerceCustomer + "/vouchers", { method: "POST", body: JSON.stringify({ amount: 5000, currency: "CNY", reference: "demo-welcome" }) });
+      commerceWalletCreated = true;
+    }
+  }
+
+  async function addCommerceItem(sku) {
+    try {
+      if (!isPages) { await ensureCommerceBackend(); await api("/v1/commerce/carts/" + commerceCartId + "/items", { method: "POST", body: JSON.stringify({ sku: sku, quantity: 1 }) }); }
+      commerceItems[sku] = (commerceItems[sku] || 0) + 1; renderCommerceCart();
+      document.getElementById("orderStatus").textContent = "CART OPEN";
+    } catch (error) { alert(error.message); }
+  }
+
+  function markCommerceStep(index) {
+    document.querySelectorAll("#checkoutSteps span").forEach(function (step, position) { step.classList.toggle("done", position <= index); });
+  }
+
+  async function checkoutCommerce() {
+    var button = document.getElementById("commerceCheckout"); button.disabled = true;
+    try {
+      markCommerceStep(0); await new Promise(function (resolve) { setTimeout(resolve, 180); });
+      var requested = Math.max(0, Number(document.getElementById("voucherSpend").value) || 0);
+      var total = commerceTotal(); var voucher = Math.min(requested, commerceWallet, total); var external = total - voucher;
+      var order;
+      if (isPages) {
+        order = { id: randomToken("order"), orderNumber: "ORD-" + Date.now().toString().slice(-6), status: external ? "PENDING_PAYMENT" : "PAID", totalAmount: total, voucherAmount: voucher, payableAmount: external, paymentId: external ? randomToken("pay") : null };
+      } else {
+        await ensureCommerceBackend();
+        order = await api("/v1/commerce/checkout", { method: "POST", headers: { "Idempotency-Key": "commerce-" + Date.now() }, body: JSON.stringify({ cartId: commerceCartId, voucherAmount: requested }) });
+      }
+      markCommerceStep(1); document.getElementById("orderStatus").textContent = "STOCK RESERVED"; await new Promise(function (resolve) { setTimeout(resolve, 260); });
+      markCommerceStep(2); document.getElementById("orderStatus").textContent = order.status.replaceAll("_", " ");
+      if (!isPages && order.paymentId) order = await api("/v1/commerce/orders/" + order.id + "/confirm", { method: "POST" });
+      else if (isPages && external) { await new Promise(function (resolve) { setTimeout(resolve, 380); }); order.status = "PAID"; }
+      if (order.status === "PAYMENT_FAILED") {
+        document.getElementById("orderStatus").textContent = "PAYMENT FAILED";
+        document.getElementById("commerceOrder").textContent = order.orderNumber;
+        document.getElementById("commerceVoucher").textContent = voucher + " CNY · REFUNDED";
+        document.getElementById("commerceExternal").textContent = external + " CNY · FAILED";
+        document.getElementById("commerceStock").textContent = "RESERVATION RELEASED";
+        button.disabled = false; return;
+      }
+      if (order.status === "PENDING_PAYMENT") {
+        commerceWallet -= voucher; renderCommerceCart();
+        document.getElementById("orderStatus").textContent = "PAYMENT PROCESSING";
+        document.getElementById("commerceOrder").textContent = order.orderNumber;
+        document.getElementById("commerceVoucher").textContent = voucher + " CNY";
+        document.getElementById("commerceExternal").textContent = external + " CNY · PROCESSING";
+        document.getElementById("commerceStock").textContent = "RESERVED"; return;
+      }
+      markCommerceStep(3); commerceWallet -= voucher;
+      Object.keys(commerceItems).forEach(function (sku) { var product = commerceProducts.find(function (item) { return item.sku === sku; }); product.available -= commerceItems[sku]; });
+      document.getElementById("orderStatus").textContent = order.status.replaceAll("_", " ");
+      document.getElementById("commerceOrder").textContent = order.orderNumber;
+      document.getElementById("commerceVoucher").textContent = voucher + " CNY";
+      document.getElementById("commerceExternal").textContent = external + " CNY" + (external ? " · SUCCEEDED" : " · NOT REQUIRED");
+      document.getElementById("commerceStock").textContent = "RESERVED → COMMITTED";
+      renderCommerceProducts(); renderCommerceCart(); renderResponse(order);
+    } catch (error) {
+      document.getElementById("orderStatus").textContent = "PAYMENT FAILED";
+      document.getElementById("commerceStock").textContent = "RESERVATION RELEASED";
+      alert(error.message);
+    }
+  }
+
+  document.getElementById("commerceCheckout").addEventListener("click", checkoutCommerce);
+
   modeBadge.textContent = isPages ? "公开演示模式 · 数据仅保存在当前浏览器" : "API 模式 · Spring Boot + PostgreSQL";
-  initializeFields(); renderPayment(null); renderOperations([], [], []);
+  initializeFields(); renderPayment(null); renderOperations([], [], []); renderCommerceProducts(); renderCommerceCart();
   if (!isPages) setInterval(function () { if (currentPayment) refreshOperations().catch(function () {}); }, 3000);
 })();

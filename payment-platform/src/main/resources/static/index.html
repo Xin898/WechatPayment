@@ -3,18 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="通过交互式实验理解支付状态机、幂等和渠道不确定性。">
-  <title>Payment Systems Lab</title>
+  <meta name="description" content="通过交互式直营电商实验理解购物车、订单、库存、Voucher 钱包与支付平台。">
+  <title>Direct Commerce Systems Lab</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="#lab" aria-label="Payment Systems Lab 首页">
-      <span class="brand-mark">P</span>
-      <span>Payment Systems Lab</span>
+    <a class="brand" href="#commerce" aria-label="Direct Commerce Systems Lab 首页">
+      <span class="brand-mark">D</span>
+      <span>Direct Commerce Lab</span>
     </a>
     <nav aria-label="主导航">
-      <a href="#lab">实验室</a>
+      <a href="#commerce">电商链路</a>
+      <a href="#lab">支付实验</a>
       <a href="#concepts">技术原理</a>
       <a href="https://github.com/Xin898/WechatPayment">源码</a>
     </nav>
@@ -23,10 +24,45 @@
   <main>
     <section class="intro">
       <p class="eyebrow">INTERACTIVE SYSTEM DESIGN</p>
-      <h1>别只读支付架构。<br><span>亲手制造一次故障。</span></h1>
-      <p class="lede">创建 Payment Intent，模拟成功、退款与网络故障，观察状态机、双式账本、Transactional Outbox 和 Webhook 重试如何共同保护一笔交易。</p>
+      <h1>从购物车到入账。<br><span>跑通一笔直营订单。</span></h1>
+      <p class="lede">一个仓库中的完整电商纵向切片：购物车、仓库库存、订单、Voucher 钱包与支付平台协作，同时保留支付状态机、账本、Outbox 和 Webhook 可观测性。</p>
       <div class="mode" id="modeBadge">正在检测运行模式…</div>
     </section>
+
+    <section class="commerce-lab" id="commerce" aria-labelledby="commerceTitle">
+      <div class="section-heading commerce-heading">
+        <div><p class="step-label">DIRECT COMMERCE / VERTICAL SLICE</p><h2 id="commerceTitle">直营电商结账实验</h2></div>
+        <span class="status-pill" id="orderStatus">CART OPEN</span>
+      </div>
+      <div class="commerce-grid">
+        <section class="panel commerce-panel">
+          <p class="step-label">01 / CATALOG + CART</p>
+          <div class="product-grid" id="productGrid"></div>
+          <div class="cart-summary"><span>购物车</span><strong id="cartSummary">0 件 · 0 CNY</strong></div>
+        </section>
+        <section class="panel commerce-panel">
+          <p class="step-label">02 / VOUCHER WALLET</p>
+          <div class="wallet-balance"><span>自由电子钱包余额</span><strong id="walletBalance">5,000 CNY</strong></div>
+          <label>本单使用 Voucher（分）<input id="voucherSpend" type="number" min="0" value="1500"></label>
+          <p class="empty-copy">Voucher 优先扣款，剩余金额自动进入 Payment Platform；支付失败会返还 Voucher 并释放库存。</p>
+        </section>
+        <section class="panel commerce-panel checkout-panel">
+          <p class="step-label">03 / CHECKOUT ORCHESTRATION</p>
+          <div class="checkout-steps" id="checkoutSteps">
+            <span>购物车</span><i>→</i><span>库存预占</span><i>→</i><span>订单</span><i>→</i><span>混合支付</span>
+          </div>
+          <button class="primary-button" id="commerceCheckout" type="button">创建订单并支付</button>
+          <dl class="payment-meta commerce-meta">
+            <div><dt>Order</dt><dd id="commerceOrder">—</dd></div>
+            <div><dt>Voucher</dt><dd id="commerceVoucher">—</dd></div>
+            <div><dt>External Pay</dt><dd id="commerceExternal">—</dd></div>
+            <div><dt>Warehouse</dt><dd id="commerceStock">等待结账</dd></div>
+          </dl>
+        </section>
+      </div>
+    </section>
+
+    <div class="lab-divider"><span>PAYMENT PLATFORM DEEP DIVE</span></div>
 
     <section class="lab" id="lab" aria-labelledby="labTitle">
       <div class="panel control-panel">
